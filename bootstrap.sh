@@ -152,7 +152,7 @@ rm -rf "$STAGE"
 
 [ -f "$MCP_FILE" ] || echo '{}' > "$MCP_FILE"
 
-# Write or overwrite the dashboard mcpServers entry, preserving other keys.
+# Write or overwrite the Perforated-Studio mcpServers entry, preserving other keys.
 python3 - "$MCP_FILE" "$PORT" "$PWD_ABS" "$PINNED" <<'EOF'
 import json
 import sys
@@ -161,7 +161,7 @@ file, port, cwd, image = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 with open(file) as f:
     config = json.load(f)
 config.setdefault("mcpServers", {})
-config["mcpServers"]["dashboard"] = {
+config["mcpServers"]["Perforated-Studio"] = {
     "command": f"{cwd}/.perforated_tools/dashboard-run.sh",
     "args": [
         "run", "--rm", "-i",
