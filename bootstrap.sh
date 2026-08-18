@@ -16,6 +16,24 @@ set -e
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Piped straight to `sh` (the one-liner the header above documents), `$0` names
+# no real file, so SELF_DIR above resolves to the caller's cwd rather than to
+# where this script actually lives — and a sibling server-bootstrap.sh was
+# never downloaded there either way, since only THIS file was fetched. Fall
+# back to pulling it fresh from the same repo it shipped from. Prefer the local
+# sibling when one exists (the repo checkout's own package/bootstrap.sh, used
+# for local dev and by the shell tests) so that path never touches the network.
+SERVER_BOOTSTRAP="$SELF_DIR/server-bootstrap.sh"
+if [ ! -f "$SERVER_BOOTSTRAP" ]; then
+  FETCH_DIR="$(mktemp -d)"
+  SERVER_BOOTSTRAP="$FETCH_DIR/server-bootstrap.sh"
+  if ! curl -fsSL "https://raw.githubusercontent.com/PerforatedAI/studio-install/main/server-bootstrap.sh" -o "$SERVER_BOOTSTRAP"; then
+    printf 'error: could not find server-bootstrap.sh locally and failed to fetch it — check your network\n' >&2
+    exit 1
+  fi
+  chmod +x "$SERVER_BOOTSTRAP"
+fi
+
 VERSION="latest"
 PORT=3002
 IMAGE=""
@@ -38,9 +56,9 @@ fi
 
 # Ensure the Server is running and capture the resolved image reference.
 if [ -n "$IMAGE" ]; then
-  RESOLVED_IMAGE="$("$SELF_DIR/server-bootstrap.sh" --port "$PORT" --image "$IMAGE" $SERVER_ARGS)"
+  RESOLVED_IMAGE="$("$SERVER_BOOTSTRAP" --port "$PORT" --image "$IMAGE" $SERVER_ARGS)"
 else
-  RESOLVED_IMAGE="$("$SELF_DIR/server-bootstrap.sh" --version "$VERSION" --port "$PORT" $SERVER_ARGS)"
+  RESOLVED_IMAGE="$("$SERVER_BOOTSTRAP" --version "$VERSION" --port "$PORT" $SERVER_ARGS)"
 fi
 
 # Install to home directory, not to the current working directory.
@@ -65,11 +83,15 @@ STAGE="$(mktemp -d)"
 CID="$(docker create "$RESOLVED_IMAGE")"
 docker cp "$CID:/app/package/skills/." "$STAGE"
 docker cp "$CID:/app/package/register.sh" "$STUDIO_HOME/bin/register.sh"
+# register.sh looks for server-bootstrap.sh at $STUDIO_HOME/bin first (its own
+# SELF_DIR-based fallback only covers running it from inside a repo checkout) —
+# without this copy, register.sh has nothing to find there on a real install.
+docker cp "$CID:/app/package/server-bootstrap.sh" "$STUDIO_HOME/bin/server-bootstrap.sh"
 # machine-uninstall.sh ships under its own source name (ticket 112) but is
 # installed as uninstall.sh — the name the Operator actually runs.
 docker cp "$CID:/app/package/machine-uninstall.sh" "$STUDIO_HOME/bin/uninstall.sh"
 docker rm "$CID" >/dev/null
-chmod +x "$STUDIO_HOME/bin/register.sh" "$STUDIO_HOME/bin/uninstall.sh"
+chmod +x "$STUDIO_HOME/bin/register.sh" "$STUDIO_HOME/bin/server-bootstrap.sh" "$STUDIO_HOME/bin/uninstall.sh"
 
 # Install extracted Skills to ~/.claude/skills/
 OUR_SKILLS=""
