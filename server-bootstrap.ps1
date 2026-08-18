@@ -1,9 +1,18 @@
 # Ensures the shared PerforatedAI Studio Server container is running on this
-# machine. Idempotent, no project concept (ADR 0028) — this never touches
+# machine. Idempotent, no project concept (ADR 0028) - this never touches
 # .mcp.json or any project directory. Per-project registration calls this first,
 # so install order never matters.
 #
 # Outputs the resolved image reference on success.
+#
+# Plain ASCII only, deliberately: this file has no UTF-8 BOM (matching every
+# other script here), and Windows PowerShell 5.1 - the version that actually
+# ships on Windows, distinct from PowerShell 7's pwsh.exe - reads a
+# BOM-less script using the system's legacy codepage, not UTF-8. A non-ASCII
+# character like an em dash silently turns into mojibake, and depending on
+# exactly where it lands, can corrupt string-literal parsing badly enough to
+# throw "Missing closing '}'" - a real failure reported from a Windows
+# machine, not a hypothetical.
 [CmdletBinding()]
 param(
     [string]$Version = "latest",
@@ -45,7 +54,7 @@ if (-not $LocalImage) {
 if (-not $LocalImage) {
     docker pull $Image 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "error: failed to pull $Image — check your network and that Docker is running" -ForegroundColor Red
+        Write-Host "error: failed to pull $Image - check your network and that Docker is running" -ForegroundColor Red
         exit 1
     }
 }
@@ -53,7 +62,7 @@ if (-not $LocalImage) {
 # Resolve the version from the image label. `latest` is an INPUT, never an output.
 $Resolved = docker inspect --format "{{index .Config.Labels `"$LabelKey`"}}" $Image 2>&1
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Resolved)) {
-    Write-Host "error: $Image carries no $LabelKey label — cannot determine its version" -ForegroundColor Red
+    Write-Host "error: $Image carries no $LabelKey label - cannot determine its version" -ForegroundColor Red
     exit 1
 }
 

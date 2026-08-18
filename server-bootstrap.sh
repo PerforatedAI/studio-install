@@ -59,8 +59,20 @@ fi
 
 # --- pull. Surface network/registry failures here, at server-bootstrap time,
 # rather than in an invisible subprocess later.
+#
+# `docker pull`'s own progress output (layer-by-layer, ending in a "Digest:"/
+# "Status:" line) goes to STDOUT by default — and this script's stdout is its
+# return value contract (the final `echo "$IMAGE"` below), read by every
+# caller via command substitution. Left unredirected, that multi-line pull
+# transcript gets prepended onto the resolved image reference, and a caller's
+# `docker create $RESOLVED_IMAGE` (unquoted, so it word-splits on the
+# embedded newlines) fails with a mangled "invalid reference format" error —
+# a real, previously silent failure that always aborted bootstrap.sh before
+# it ever reached the Skills install step whenever a real pull actually had
+# layers to fetch. Redirected to stderr instead: still visible to the
+# Operator watching the terminal, never mistaken for the return value.
 if [ "$LOCAL_IMAGE" -eq 0 ]; then
-  if ! docker pull "$IMAGE"; then
+  if ! docker pull "$IMAGE" >&2; then
     printf 'error: failed to pull %s — check your network and that Docker is running\n' "$IMAGE" >&2
     exit 1
   fi

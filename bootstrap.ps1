@@ -26,13 +26,39 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Piped straight to `iex` (the README's documented upgrade one-liner), there is
+# no script file at all - $MyInvocation.MyCommand.Path is $null - and even the
+# two-step `-OutFile bootstrap.ps1; .\bootstrap.ps1` form only ever downloads
+# THIS file, never a server-bootstrap.ps1 sibling alongside it. Either way,
+# fall back to fetching it fresh from the same repo this script shipped from.
+# Prefer a local sibling when one exists (a repo checkout's own
+# package\windows\bootstrap.ps1, used for local dev) so that path never
+# touches the network.
+$ScriptDir = $null
+if ($MyInvocation.MyCommand.Path) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
 
-# Call server-bootstrap.ps1 to ensure the Server is running and get the resolved image.
-$ServerBootstrapScript = Join-Path $ScriptDir "server-bootstrap.ps1"
-if (-not (Test-Path $ServerBootstrapScript)) {
-    Write-Error "error: server-bootstrap.ps1 not found in $ScriptDir"
-    exit 1
+$ServerBootstrapScript = $null
+if ($ScriptDir) {
+    $Candidate = Join-Path $ScriptDir "server-bootstrap.ps1"
+    if (Test-Path $Candidate) { $ServerBootstrapScript = $Candidate }
+}
+
+if (-not $ServerBootstrapScript) {
+    $FetchDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+    New-Item -ItemType Directory -Force -Path $FetchDir | Out-Null
+    $ServerBootstrapScript = Join-Path $FetchDir "server-bootstrap.ps1"
+    try {
+        Invoke-WebRequest `
+            -Uri "https://raw.githubusercontent.com/PerforatedAI/studio-install/main/server-bootstrap.ps1" `
+            -OutFile $ServerBootstrapScript `
+            -UseBasicParsing `
+            -ErrorAction Stop
+    } catch {
+        Write-Error "error: could not find server-bootstrap.ps1 locally and failed to fetch it - check your network: $_"
+        exit 1
+    }
 }
 
 $ServerBootstrapArgs = @("--version", $Version, "--port", $Port)
@@ -89,10 +115,33 @@ try {
         exit 1
     }
 
-    docker cp "${Cid}:/app/package/register.ps1" (Join-Path $BinDir "register.ps1") 2>&1 | Out-Null
+    # Windows scripts ship under package\windows\ in the image, not package\ -
+    # a source path that never matched what's actually there for register.ps1
+    # meant this docker cp always failed.
+    docker cp "${Cid}:/app/package/windows/register.ps1" (Join-Path $BinDir "register.ps1") 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         docker rm $Cid *> $null
         Write-Error "error: failed to extract register.ps1 from $ResolvedImage"
+        exit 1
+    }
+
+    # server-bootstrap.ps1 lands here too: register.ps1 looks for it at
+    # $StudioHome\bin\server-bootstrap.ps1 first, and nothing had ever put it
+    # there on a real install.
+    docker cp "${Cid}:/app/package/windows/server-bootstrap.ps1" (Join-Path $BinDir "server-bootstrap.ps1") 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        docker rm $Cid *> $null
+        Write-Error "error: failed to extract server-bootstrap.ps1 from $ResolvedImage"
+        exit 1
+    }
+
+    # Machine teardown script - the Operator runs it as
+    # $StudioHome\bin\uninstall-server.ps1, per its own header comment, but
+    # nothing had ever placed it there either.
+    docker cp "${Cid}:/app/package/windows/uninstall-server.ps1" (Join-Path $BinDir "uninstall-server.ps1") 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        docker rm $Cid *> $null
+        Write-Error "error: failed to extract uninstall-server.ps1 from $ResolvedImage"
         exit 1
     }
 
