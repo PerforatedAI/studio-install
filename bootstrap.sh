@@ -1,145 +1,77 @@
 #!/bin/sh
-# PerforatedAI Studio installer.
+# PerforatedAI Studio machine-scoped bootstrap.
 #
-# Run from inside the project you want to install into:
+# Run once per machine, from anywhere:
 #   curl -fsSL https://raw.githubusercontent.com/PerforatedAI/studio-install/main/bootstrap.sh | sh
 #
-# Re-run it to upgrade. It is idempotent.
+# Ensures the shared Server is running on this machine and installs machine-level
+# artifacts: Skills to ~/.claude/skills/, register.sh to ~/.perforated_studio/bin/,
+# and the machine manifest ~/.perforated_studio/installed.json.
+#
+# Projects are registered separately via register.sh (run by the Skill).
 #
 # This script runs on the HOST, not in the container: it calls docker and writes
-# .mcp.json, neither of which a container can do for us.
+# to the user's home directory.
 set -e
 
-# GHCR, not Docker Hub: Docker Hub rate-limits anonymous pulls per IP, and the
-# first thing this script does is an anonymous pull. A team behind one corporate
-# NAT would hit `toomanyrequests` on a machine where nothing is wrong (ADR 0022).
-IMAGE_REPO="ghcr.io/perforatedai/studio"
-LABEL_KEY="org.opencontainers.image.version"
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 VERSION="latest"
 PORT=3002
 IMAGE=""
+UPDATE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION="$2"; shift 2 ;;
     --port)    PORT="$2"; shift 2 ;;
-    # Dev hatch: install from a local image instead of pulling. Undocumented.
     --image)   IMAGE="$2"; shift 2 ;;
+    --update)  UPDATE=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-# --image names an image that already exists locally (a dev build): use it as-is
-# and skip the pull. Otherwise we install a published version from the registry.
+SERVER_ARGS=""
+if [ "$UPDATE" -eq 1 ]; then
+  SERVER_ARGS="--update"
+fi
+
+# Ensure the Server is running and capture the resolved image reference.
 if [ -n "$IMAGE" ]; then
-  LOCAL_IMAGE=1
+  RESOLVED_IMAGE="$("$SELF_DIR/server-bootstrap.sh" --port "$PORT" --image "$IMAGE" $SERVER_ARGS)"
 else
-  LOCAL_IMAGE=0
-  IMAGE="$IMAGE_REPO:$VERSION"
+  RESOLVED_IMAGE="$("$SELF_DIR/server-bootstrap.sh" --version "$VERSION" --port "$PORT" $SERVER_ARGS)"
 fi
 
-# --- pull. Surface network/registry failures here, at install time, rather than
-# in the invisible MCP subprocess later.
-if [ "$LOCAL_IMAGE" -eq 0 ]; then
-  if ! docker pull "$IMAGE"; then
-    printf 'error: failed to pull %s — check your network and that Docker is running\n' "$IMAGE" >&2
-    exit 1
-  fi
-fi
+# Install to home directory, not to the current working directory.
+STUDIO_HOME="${HOME}/.perforated_studio"
+mkdir -p "$STUDIO_HOME/bin"
 
-# --- resolve. `latest` is an INPUT to this installer, never an output: the image
-# reference we write into .mcp.json is re-resolved by Claude Code on every session
-# start, so a floating tag there would let the MCP Server drift to a new version
-# while the skills we copy to disk below stay frozen at this one (ADR 0023).
-#
-# The version rides inside the image as a label, so reading it back needs no
-# registry API and no second network call.
-RESOLVED="$(docker inspect --format "{{index .Config.Labels \"$LABEL_KEY\"}}" "$IMAGE")"
-if [ -z "$RESOLVED" ]; then
-  printf 'error: %s carries no %s label — cannot determine its version\n' "$IMAGE" "$LABEL_KEY" >&2
-  exit 1
-fi
-# What goes into .mcp.json. For a local dev build that's the image itself — wiring
-# up a published tag the local build isn't would point every session at the wrong
-# image (or none at all).
-if [ "$LOCAL_IMAGE" -eq 1 ]; then
-  PINNED="$IMAGE"
-else
-  PINNED="$IMAGE_REPO:$RESOLVED"
-  # Give the daemon the image under the name everything else refers to. Pulling
-  # `:latest` stores it under THAT tag, but .mcp.json and the manifest name the
-  # resolved tag — so without this the daemon holds no image called
-  # `…:v0.1.0`, uninstall's `docker rmi` finds nothing and the image leaks, and
-  # the user's first session re-pulls what is already on disk.
-  #
-  # Then drop the tag we pulled under, so the resolved ref is the ONLY local
-  # reference. `docker rmi <tag>` deletes the tag, not the image, while any other
-  # tag still points at it — leave `:latest` behind and uninstall's rmi succeeds
-  # while the image quietly stays on disk.
-  if [ "$IMAGE" != "$PINNED" ]; then
-    docker tag "$IMAGE" "$PINNED"
-    docker rmi "$IMAGE" >/dev/null 2>&1 || true
-    # Everything below must now refer to the pinned ref. `docker run` and
-    # `docker create` silently PULL an image that isn't present locally, so a
-    # later command still naming `:latest` would fetch it again and recreate the
-    # very tag we just dropped.
-    IMAGE="$PINNED"
-  fi
-fi
+SKILLS_DIR="${HOME}/.claude/skills"
+mkdir -p "$SKILLS_DIR"
 
-# --- smoke test: verify the image actually runs AND its deps import on this
-# machine before we wire up the MCP config. Importing the module exercises the
-# heavy imports (torch, the ml plugin) without starting the blocking server.
-# A failure here is loud; the same failure inside the MCP subprocess later is not.
-if ! docker run --rm --entrypoint python "$IMAGE" -c "import mcp_server.server" >/dev/null 2>&1; then
-  echo "error: $IMAGE failed to start on this machine. Details:" >&2
-  docker run --rm --entrypoint python "$IMAGE" -c "import mcp_server.server" 2>&1 | sed 's/^/  /' >&2
-  exit 1
-fi
-
-PWD_ABS="$(pwd)"
-MCP_FILE=".mcp.json"
-TOOLS_DIR="$PWD_ABS/.perforated_tools"
-SKILLS_DIR="$PWD_ABS/.claude/skills"
-
-MANIFEST="$TOOLS_DIR/installed.json"
-
-# --- reconcile. Re-running this script is the upgrade path, so a version that
-# renames or drops a skill must take the old one away with it — otherwise it sits
-# orphaned in .claude/skills/, still loaded by Claude, calling tools that may no
-# longer exist.
-#
-# We remove ONLY the skills our own manifest says we installed. Never the whole of
-# .claude/skills/ — the user keeps their own skills in there, and eating a
-# customer's hand-written work on upgrade is unforgivable. The manifest is the
-# only thing that lets us tell our skills from theirs.
-if [ -f "$MANIFEST" ]; then
-  PREVIOUS_SKILLS="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("skills", [])))' "$MANIFEST")"
+# Reconcile Skills: remove only those recorded in the previous manifest,
+# leaving any hand-written Skills alone. ADR 0021.
+PREV_MANIFEST="$STUDIO_HOME/installed.json"
+if [ -f "$PREV_MANIFEST" ]; then
+  PREVIOUS_SKILLS="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("skills", [])))' "$PREV_MANIFEST")"
   for skill in $PREVIOUS_SKILLS; do
     rm -rf "$SKILLS_DIR/$skill"
   done
 fi
 
-# --- extract the Package the image carries: the skills, the runtime launcher and
-# the uninstaller (ADR 0021). /app/package/ is a frozen contract — this script is
-# always published from main but may be run against an image cut long ago.
-#
-# `docker cp` rather than a `-v` bind mount: a container writing through a bind
-# mount leaves root-owned files on the host on Linux. cp chowns to the caller.
-#
-# Skills land in a staging dir first, so we learn exactly which skills came out of
-# the image. Listing .claude/skills/ afterwards would sweep the user's own skills
-# into our manifest — and a later uninstall would then delete them.
-mkdir -p "$TOOLS_DIR" "$SKILLS_DIR"
+# Extract Skills from the resolved image via docker create + docker cp.
 STAGE="$(mktemp -d)"
-CID="$(docker create "$IMAGE")"
+CID="$(docker create "$RESOLVED_IMAGE")"
 docker cp "$CID:/app/package/skills/." "$STAGE"
-docker cp "$CID:/app/package/dashboard-run.sh" "$TOOLS_DIR/dashboard-run.sh"
-docker cp "$CID:/app/package/uninstall.sh" "$TOOLS_DIR/uninstall.sh"
+docker cp "$CID:/app/package/register.sh" "$STUDIO_HOME/bin/register.sh"
+# machine-uninstall.sh ships under its own source name (ticket 112) but is
+# installed as uninstall.sh — the name the Operator actually runs.
+docker cp "$CID:/app/package/machine-uninstall.sh" "$STUDIO_HOME/bin/uninstall.sh"
 docker rm "$CID" >/dev/null
-chmod +x "$TOOLS_DIR/dashboard-run.sh" "$TOOLS_DIR/uninstall.sh"
+chmod +x "$STUDIO_HOME/bin/register.sh" "$STUDIO_HOME/bin/uninstall.sh"
 
+# Install extracted Skills to ~/.claude/skills/
 OUR_SKILLS=""
 for skill_path in "$STAGE"/*/; do
   [ -d "$skill_path" ] || continue
@@ -150,48 +82,19 @@ for skill_path in "$STAGE"/*/; do
 done
 rm -rf "$STAGE"
 
-[ -f "$MCP_FILE" ] || echo '{}' > "$MCP_FILE"
-
-# Write or overwrite the Perforated-Studio mcpServers entry, preserving other keys.
-python3 - "$MCP_FILE" "$PORT" "$PWD_ABS" "$PINNED" <<'EOF'
-import json
-import sys
-
-file, port, cwd, image = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(file) as f:
-    config = json.load(f)
-config.setdefault("mcpServers", {})
-config["mcpServers"]["Perforated-Studio"] = {
-    "command": f"{cwd}/.perforated_tools/dashboard-run.sh",
-    "args": [
-        "run", "--rm", "-i",
-        "-p", f"{port}:{port}",
-        "-v", f"{cwd}:/workspace:ro",
-        "-v", f"{cwd}/.perforated_tools:/perforated_tools:rw",
-        image,
-    ],
-}
-with open(file, "w") as f:
-    json.dump(config, f, indent=2)
-    f.write("\n")
-EOF
-
-# --- record what we installed. This manifest is the record of what this installer
-# OWNS: uninstall reads it to know what to tear down, and the next run reads it to
-# know what to clean up before laying down a new version. Without it we would have
-# to guess, and guessing means either leaving orphans behind or deleting skills the
-# user wrote themselves.
-python3 - "$MANIFEST" "$PINNED" "$RESOLVED" "$PORT" "$OUR_SKILLS" <<'EOF'
+# Write the machine manifest.
+MANIFEST="$STUDIO_HOME/installed.json"
+python3 - "$MANIFEST" "$RESOLVED_IMAGE" "$PORT" "$OUR_SKILLS" <<'EOF'
 import datetime
 import json
 import sys
 
-path, image, version, port, skill_names = sys.argv[1:6]
+path, server_image, port, skill_names = sys.argv[1:5]
 manifest = {
-    "image": image,
-    "version": version,
-    "port": int(port),
     "skills": skill_names.split(),
+    "package_version": server_image.split(":")[-1],
+    "server_image": server_image,
+    "port": int(port),
     "installed_at": datetime.datetime.now(datetime.timezone.utc)
         .isoformat(timespec="seconds").replace("+00:00", "Z"),
 }
@@ -199,15 +102,3 @@ with open(path, "w") as f:
     json.dump(manifest, f, indent=2)
     f.write("\n")
 EOF
-
-BOOTSTRAP_URL="https://raw.githubusercontent.com/PerforatedAI/studio-install/main/bootstrap.sh"
-
-echo "Installed PerforatedAI Studio $RESOLVED on port $PORT"
-echo "  skills:    $SKILLS_DIR"
-echo "  uninstall: $TOOLS_DIR/uninstall.sh"
-echo
-# Re-running this script IS the upgrade path — there is no update.sh, because
-# anything shipped in the image is by definition the previous version's logic.
-# Nothing else tells the user this, so say it here.
-echo "To upgrade, re-run the installer:"
-echo "  curl -fsSL $BOOTSTRAP_URL | sh"
