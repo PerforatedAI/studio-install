@@ -28,7 +28,7 @@ $LabelKey = "org.opencontainers.image.version"
 $ContainerName = "perforatedai-studio-server"
 $VolumeName = "perforated-studio-data"
 
-# Check if Server is already running. If so and not --update, report its image and exit.
+# Check if Server is already running. If so and not -Update, report its image and exit.
 $RunningContainer = docker ps --filter "name=$ContainerName" --filter "status=running" --format "{{.ID}}" 2>&1 | Select-Object -First 1
 if ($RunningContainer -and -not $Update) {
     $ImageRunning = docker inspect --format "{{.Config.Image}}" $ContainerName 2>&1
@@ -38,9 +38,9 @@ if ($RunningContainer -and -not $Update) {
     }
 }
 
-# If --update, stop and remove the running container to restart it fresh.
+# If -Update, stop and remove the running container to restart it fresh.
 if ($Update -and $RunningContainer) {
-    Write-Host "--update: stopping the running Server to restart it on a fresh image..." -ForegroundColor Yellow
+    Write-Host "-Update: stopping the running Server to restart it on a fresh image..." -ForegroundColor Yellow
     docker stop $ContainerName *> $null
     docker rm $ContainerName *> $null
 }

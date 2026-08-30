@@ -72,7 +72,7 @@ $PrevManifest = Join-Path $StudioHome "installed.json"
 
 $SignupEndpoint = if ($env:SIGNUP_ENDPOINT) { $env:SIGNUP_ENDPOINT } else { "https://api.perforatedai.com/signup" }
 $SlackInviteUrl = if ($env:SLACK_INVITE_URL) { $env:SLACK_INVITE_URL } else { "https://join.slack.com/t/perforatedcommunity/shared_invite/zt-409j8mfv9-fMOyIHI7LIKHa1Gs6Tit_A" }
-$BootstrapScriptVersion = "v0.2.5"
+$BootstrapScriptVersion = "v0.2.6"
 
 # The Signup Gate (ADR 0044): required before any Docker activity, fails
 # closed on submission failure. Completion is recorded in the machine
@@ -180,9 +180,9 @@ if (Test-Path $PrevManifest) {
 }
 if (-not $SignupCompleted -and -not $SkipSignup) { Invoke-SignupGate }
 
-$ServerBootstrapArgs = @("--version", $Version, "--port", $Port)
-if ($Image) { $ServerBootstrapArgs += @("--image", $Image) }
-if ($Update) { $ServerBootstrapArgs += "--update" }
+$ServerBootstrapArgs = @("-Version", $Version, "-Port", $Port)
+if ($Image) { $ServerBootstrapArgs += @("-Image", $Image) }
+if ($Update) { $ServerBootstrapArgs += "-Update" }
 
 try {
     $ResolvedImage = & $ServerBootstrapScript @ServerBootstrapArgs
