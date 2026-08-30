@@ -262,18 +262,23 @@ try {
     }
 
     docker rm $Cid *> $null
+
+    # Install extracted Skills to $env:USERPROFILE\.claude\skills\ while the
+    # staging dir still exists - the finally below deletes it.
+    $OurSkills = @()
+    Get-ChildItem -Directory -Path $Stage | ForEach-Object {
+        $skillName = $_.Name
+        $dest = Join-Path $SkillsDir $skillName
+        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+        Copy-Item -Recurse -Force -Path $_.FullName -Destination $dest
+        $OurSkills += $skillName
+    }
+    if ($OurSkills.Count -eq 0) {
+        Write-Error "error: no skills were extracted from $ResolvedImage"
+        exit 1
+    }
 } finally {
     if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
-}
-
-# Install extracted Skills to $env:USERPROFILE\.claude\skills\
-$OurSkills = @()
-Get-ChildItem -Directory -Path $Stage -ErrorAction SilentlyContinue | ForEach-Object {
-    $skillName = $_.Name
-    $dest = Join-Path $SkillsDir $skillName
-    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-    Copy-Item -Recurse -Force -Path $_.FullName -Destination $dest
-    $OurSkills += $skillName
 }
 
 # Record what we installed. This manifest is the record of what this installer
