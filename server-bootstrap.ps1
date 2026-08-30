@@ -60,8 +60,19 @@ if (-not $LocalImage) {
 }
 
 # Resolve the version from the image label. `latest` is an INPUT, never an output.
-$Resolved = docker inspect --format "{{index .Config.Labels `"$LabelKey`"}}" $Image 2>&1
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Resolved)) {
+# Parse `docker inspect` JSON rather than a Go --format template: Windows
+# PowerShell 5.1 strips the embedded quotes that {{index .Config.Labels "key"}}
+# needs, so docker parses the bare `org` as a template function and fails with
+# 'function "org" not defined'.
+$Resolved = $null
+try {
+    $Inspect = docker inspect $Image 2>$null | ConvertFrom-Json
+    $Labels = $Inspect[0].Config.Labels
+    if ($Labels) { $Resolved = $Labels.$LabelKey }
+} catch {
+    $Resolved = $null
+}
+if ([string]::IsNullOrWhiteSpace($Resolved)) {
     Write-Host "error: $Image carries no $LabelKey label - cannot determine its version" -ForegroundColor Red
     exit 1
 }
