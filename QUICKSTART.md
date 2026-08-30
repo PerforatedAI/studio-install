@@ -9,6 +9,8 @@ For what each piece *is*, see [README.md](README.md). This is just the happy pat
 ## Before you start
 
 - **Docker**, running. The shared Server ships as a container; the installer fails fast if Docker isn't up.
+- **Python**, in the project's own environment, with `torch` installed. The export script and the
+  PerforatedAI training loop run locally in that environment, not inside the Server container.
 - **Claude Code**, in the project you want to add dendrites to.
 - **A PyTorch project** with a model class and a dataloader you can import.
 
@@ -239,6 +241,13 @@ Rebuilt the image and want the already-running Server to pick it up? Re-run with
 
 ```sh
 sh package/bootstrap.sh --image perforated_studio_mcp:dev --update
+```
+
+Iterating quickly and don't want to answer the signup questions on every re-run? Add
+`--skip-signup` (also dev-only, never the public one-liner):
+
+```sh
+sh package/bootstrap.sh --image perforated_studio_mcp:dev --update --skip-signup
 ```
 
 **Windows support:** `bootstrap.ps1` now mirrors the Unix flow: machine-scoped install followed by

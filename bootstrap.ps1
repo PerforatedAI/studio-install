@@ -21,7 +21,10 @@ param(
     # Dev hatch: install from a local image instead of pulling. Undocumented.
     [string]$Image = "",
     # Upgrade: stop and replace the running Server. Undocumented.
-    [switch]$Update
+    [switch]$Update,
+    # Dev hatch: skip the signup gate prompts. Undocumented - for the local
+    # dev loop, never the public install one-liner.
+    [switch]$SkipSignup
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +64,122 @@ if (-not $ServerBootstrapScript) {
     }
 }
 
+# Install to home directory, not to the current working directory.
+$StudioHome = Join-Path $env:USERPROFILE ".perforated_studio"
+$BinDir = Join-Path $StudioHome "bin"
+$SkillsDir = Join-Path $env:USERPROFILE ".claude\skills"
+$PrevManifest = Join-Path $StudioHome "installed.json"
+
+$SignupEndpoint = if ($env:SIGNUP_ENDPOINT) { $env:SIGNUP_ENDPOINT } else { "https://api.perforatedai.com/signup" }
+$SlackInviteUrl = if ($env:SLACK_INVITE_URL) { $env:SLACK_INVITE_URL } else { "https://join.slack.com/t/perforatedcommunity/shared_invite/zt-409j8mfv9-fMOyIHI7LIKHa1Gs6Tit_A" }
+$BootstrapScriptVersion = "v0.2.5"
+
+# The Signup Gate (ADR 0044): required before any Docker activity, fails
+# closed on submission failure. Completion is recorded in the machine
+# manifest so a later run never re-prompts.
+function Invoke-SignupGate {
+    $Email = ""
+    while (-not $Email) {
+        $EmailInput = Read-Host "Work email"
+        if ($EmailInput -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            $Email = $EmailInput
+        } else {
+            Write-Host "That does not look like a valid email address - please try again."
+        }
+    }
+
+    $Role = ""
+    $RoleOther = ""
+    Write-Host "Role:"
+    Write-Host "  1) Software engineer"
+    Write-Host "  2) ML engineer"
+    Write-Host "  3) Data scientist"
+    Write-Host "  4) Student"
+    Write-Host "  5) Other"
+    while (-not $Role) {
+        $Choice = Read-Host "Choice [1-5]"
+        switch ($Choice) {
+            "1" { $Role = "software_engineer" }
+            "2" { $Role = "ml_engineer" }
+            "3" { $Role = "data_scientist" }
+            "4" { $Role = "student" }
+            "5" {
+                $Role = "other"
+                $RoleOther = Read-Host "Please describe your role"
+            }
+            default { Write-Host "Please enter a number from 1-5." }
+        }
+    }
+
+    $Modality = ""
+    $ModalityOther = ""
+    Write-Host "Data modality:"
+    Write-Host "  1) Computer vision"
+    Write-Host "  2) Language"
+    Write-Host "  3) Tabular"
+    Write-Host "  4) Other"
+    while (-not $Modality) {
+        $Choice = Read-Host "Choice [1-4]"
+        switch ($Choice) {
+            "1" { $Modality = "computer_vision" }
+            "2" { $Modality = "language" }
+            "3" { $Modality = "tabular" }
+            "4" {
+                $Modality = "other"
+                $ModalityOther = Read-Host "Please describe your data modality"
+            }
+            default { Write-Host "Please enter a number from 1-4." }
+        }
+    }
+
+    $Payload = [PSCustomObject]@{
+        email          = $Email
+        role           = $Role
+        role_other     = $RoleOther
+        modality       = $Modality
+        modality_other = $ModalityOther
+        source         = "cli-bootstrap"
+        script_version = $BootstrapScriptVersion
+        os             = "Windows"
+        timestamp      = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    } | ConvertTo-Json
+
+    try {
+        Invoke-RestMethod -Uri $SignupEndpoint -Method Post -ContentType "application/json" -Body $Payload -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Error "error: signup failed - could not reach ${SignupEndpoint}. Check your network and try again: $_"
+        exit 1
+    }
+
+    New-Item -ItemType Directory -Force -Path $StudioHome | Out-Null
+    $Manifest = @{}
+    if (Test-Path $PrevManifest) {
+        try {
+            $Existing = Get-Content $PrevManifest -Raw | ConvertFrom-Json
+            $Existing.PSObject.Properties | ForEach-Object { $Manifest[$_.Name] = $_.Value }
+        } catch {
+            Write-Host "warning: failed to parse previous manifest, starting fresh: $_" -ForegroundColor Yellow
+        }
+    }
+    $Manifest["signup_completed"] = $true
+    $Manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $PrevManifest
+
+    Write-Host ""
+    Write-Host "You are in! Join us on Slack: $SlackInviteUrl"
+    Write-Host ""
+}
+
+$SignupCompleted = $false
+if (Test-Path $PrevManifest) {
+    try {
+        $ExistingManifest = Get-Content $PrevManifest -Raw | ConvertFrom-Json
+        if ($ExistingManifest.signup_completed) { $SignupCompleted = $true }
+    } catch {
+        Write-Host "warning: failed to parse previous manifest, treating signup as incomplete: $_" -ForegroundColor Yellow
+    }
+}
+if (-not $SignupCompleted -and -not $SkipSignup) { Invoke-SignupGate }
+
 $ServerBootstrapArgs = @("--version", $Version, "--port", $Port)
 if ($Image) { $ServerBootstrapArgs += @("--image", $Image) }
 if ($Update) { $ServerBootstrapArgs += "--update" }
@@ -74,14 +193,8 @@ try {
 }
 
 # Install to home directory, not to the current working directory.
-$StudioHome = Join-Path $env:USERPROFILE ".perforated_studio"
-$BinDir = Join-Path $StudioHome "bin"
-$SkillsDir = Join-Path $env:USERPROFILE ".claude\skills"
-
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $SkillsDir | Out-Null
-
-$PrevManifest = Join-Path $StudioHome "installed.json"
 
 # Reconcile Skills: remove only those recorded in the previous manifest,
 # leaving any hand-written Skills alone (ADR 0021).
@@ -162,13 +275,22 @@ Get-ChildItem -Directory -Path $Stage -ErrorAction SilentlyContinue | ForEach-Ob
 
 # Record what we installed. This manifest is the record of what this installer
 # OWNS: uninstall reads it to know what to tear down, and the next run reads it
-# to know what to clean up before laying down a new version.
+# to know what to clean up before laying down a new version. signup_completed
+# was already recorded by Invoke-SignupGate, before any Docker activity ran -
+# carry it forward rather than clobbering it.
+$SignupCompletedFlag = $false
+if (Test-Path $PrevManifest) {
+    try {
+        $SignupCompletedFlag = [bool](Get-Content $PrevManifest -Raw | ConvertFrom-Json).signup_completed
+    } catch { }
+}
 $ManifestObj = [PSCustomObject]@{
-    image        = $ResolvedImage
-    version      = ($ResolvedImage -split ':')[-1]
-    port         = $Port
-    skills       = [array]$OurSkills
-    installed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    image            = $ResolvedImage
+    version          = ($ResolvedImage -split ':')[-1]
+    port             = $Port
+    skills           = [array]$OurSkills
+    installed_at     = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    signup_completed = $SignupCompletedFlag
 }
 $ManifestObj | ConvertTo-Json -Depth 10 | Set-Content -Path $PrevManifest
 
