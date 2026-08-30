@@ -72,7 +72,7 @@ $PrevManifest = Join-Path $StudioHome "installed.json"
 
 $SignupEndpoint = if ($env:SIGNUP_ENDPOINT) { $env:SIGNUP_ENDPOINT } else { "https://api.perforatedai.com/signup" }
 $SlackInviteUrl = if ($env:SLACK_INVITE_URL) { $env:SLACK_INVITE_URL } else { "https://join.slack.com/t/perforatedcommunity/shared_invite/zt-409j8mfv9-fMOyIHI7LIKHa1Gs6Tit_A" }
-$BootstrapScriptVersion = "v0.2.6"
+$BootstrapScriptVersion = "v0.2.7"
 
 # The Signup Gate (ADR 0044): required before any Docker activity, fails
 # closed on submission failure. Completion is recorded in the machine
@@ -180,9 +180,12 @@ if (Test-Path $PrevManifest) {
 }
 if (-not $SignupCompleted -and -not $SkipSignup) { Invoke-SignupGate }
 
-$ServerBootstrapArgs = @("-Version", $Version, "-Port", $Port)
-if ($Image) { $ServerBootstrapArgs += @("-Image", $Image) }
-if ($Update) { $ServerBootstrapArgs += "-Update" }
+# Hashtable splat, not an array: array splatting binds elements positionally, so
+# "-Version" would land in $Version and "latest" in [int]$Port. A hashtable
+# splats as named parameters.
+$ServerBootstrapArgs = @{ Version = $Version; Port = $Port }
+if ($Image) { $ServerBootstrapArgs["Image"] = $Image }
+if ($Update) { $ServerBootstrapArgs["Update"] = $true }
 
 try {
     $ResolvedImage = & $ServerBootstrapScript @ServerBootstrapArgs
