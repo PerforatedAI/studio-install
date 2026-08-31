@@ -39,16 +39,35 @@ MANIFEST="$STUDIO_HOME/installed.json"
 
 SIGNUP_ENDPOINT="${SIGNUP_ENDPOINT:-https://api.perforatedai.com/signup}"
 SLACK_INVITE_URL="${SLACK_INVITE_URL:-https://join.slack.com/t/perforatedcommunity/shared_invite/zt-409j8mfv9-fMOyIHI7LIKHa1Gs6Tit_A}"
-BOOTSTRAP_SCRIPT_VERSION="v0.2.5"
+BOOTSTRAP_SCRIPT_VERSION="v0.3.6"
 
 # The Signup Gate (ADR 0044): required before any Docker activity, fails
 # closed on submission failure. Completion is recorded in the machine
 # manifest so a later run never re-prompts.
 run_signup_gate() {
+  # `curl -fsSL ... | sh` leaves this script's own (already-consumed) text on
+  # stdin, so a bare `read` in the loops below gets EOF immediately and spins
+  # forever re-prompting. Read the prompts from the controlling terminal
+  # instead. The shell test harness has no tty and feeds the answers on stdin,
+  # so it sets PERFORATED_SIGNUP_INPUT_STDIN=1 to opt back into reading stdin.
+  if [ -z "$PERFORATED_SIGNUP_INPUT_STDIN" ] && [ -e /dev/tty ] && (exec 3</dev/tty) 2>/dev/null; then
+    exec 3</dev/tty
+  else
+    exec 3<&0
+  fi
+
+  # Read one reply into the named variable, aborting on EOF rather than looping.
+  _read_reply() {
+    if ! read -r "$1" <&3; then
+      printf '\nerror: reached end of input while waiting for a reply. Run this script from a terminal (see the docs), not a non-interactive pipe.\n' >&2
+      exit 1
+    fi
+  }
+
   EMAIL=""
   while [ -z "$EMAIL" ]; do
     printf 'Work email: '
-    read -r INPUT
+    _read_reply INPUT
     if printf '%s' "$INPUT" | python3 -c 'import re, sys
 sys.exit(0 if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sys.stdin.read().strip()) else 1)'; then
       EMAIL="$INPUT"
@@ -68,7 +87,7 @@ sys.exit(0 if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sys.stdin.read().strip()) 
   printf 'Role:\n  1) Software engineer\n  2) ML engineer\n  3) Data scientist\n  4) Student\n  5) Other\n'
   while [ -z "$ROLE" ]; do
     printf 'Choice [1-5]: '
-    read -r CHOICE
+    _read_reply CHOICE
     case "$CHOICE" in
       1) ROLE="software_engineer" ;;
       2) ROLE="ml_engineer" ;;
@@ -77,7 +96,7 @@ sys.exit(0 if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sys.stdin.read().strip()) 
       5)
         ROLE="other"
         printf 'Please describe your role: '
-        read -r ROLE_OTHER
+        _read_reply ROLE_OTHER
         ;;
       *) printf 'Please enter a number from 1-5.\n' ;;
     esac
@@ -88,7 +107,7 @@ sys.exit(0 if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sys.stdin.read().strip()) 
   printf 'Data modality:\n  1) Computer vision\n  2) Language\n  3) Tabular\n  4) Other\n'
   while [ -z "$MODALITY" ]; do
     printf 'Choice [1-4]: '
-    read -r CHOICE
+    _read_reply CHOICE
     case "$CHOICE" in
       1) MODALITY="computer_vision" ;;
       2) MODALITY="language" ;;
@@ -96,7 +115,7 @@ sys.exit(0 if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sys.stdin.read().strip()) 
       4)
         MODALITY="other"
         printf 'Please describe your data modality: '
-        read -r MODALITY_OTHER
+        _read_reply MODALITY_OTHER
         ;;
       *) printf 'Please enter a number from 1-4.\n' ;;
     esac
