@@ -5,7 +5,7 @@
 ### Better accuracy, smaller models, less data - enabled by perforated learning
 <img src="https://img.shields.io/badge/python-3.7%2B-blue?logo=python&logoColor=white" />
 <img src="https://img.shields.io/badge/Docker-required-blue?logo=docker&logoColor=white" />
-<img src="https://img.shields.io/badge/Claude%20Code-required-blue?logo=anthropic&logoColor=white" />
+
 
 
 </div>
@@ -13,7 +13,13 @@
 # Introduction
 Perforated is a data-efficiency layer for machine learning that adds artificial **dendrites** to your neural network. By adding neuron-specific learning signals during training, Perforated helps models achieve higher accuracy with fewer parameters, less data, and lower deployment costs. It integrates directly into existing PyTorch workflows with minimal code changes. 
 
-Perforated Studio is the coding agent and dashboard that combines the CLI feel with a dashboard to make it simple and easy to get started perforating your modeles. 
+Perforated Studio is the coding agent and dashboard that combines the CLI feel with a dashboard to make it simple and easy to get started perforating your models. 
+
+<div align="center">
+<video autoplay="" loop="" muted="" playsinline="" class="w-full h-auto" aria-label="Perforated Studio demo visualization" data-astro-cid-x2wsp3hm=""> <source src="assets/perforated-studio-hero-video-x4speed-12s.mp4" type="video/mp4" data-astro-cid-x2wsp3hm="">
+Your browser does not support the video tag.
+</video>
+</div>
 
 ---
 
