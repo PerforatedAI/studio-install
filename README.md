@@ -16,9 +16,7 @@ Perforated is a data-efficiency layer for machine learning that adds artificial 
 Perforated Studio is the coding agent and dashboard that combines the CLI feel with a dashboard to make it simple and easy to get started perforating your models. 
 
 <div align="center">
-<video autoplay="" loop="" muted="" playsinline="" class="w-full h-auto" aria-label="Perforated Studio demo visualization" data-astro-cid-x2wsp3hm=""> <source src="assets/perforated-studio-hero-video-x4speed-12s.mp4" type="video/mp4" data-astro-cid-x2wsp3hm="">
-Your browser does not support the video tag.
-</video>
+<img src="assets/perforated-studio-hero.gif" alt="Perforated Studio demo visualization" width="800" />
 </div>
 
 ---
