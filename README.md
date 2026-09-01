@@ -203,10 +203,12 @@ running (starting it if it isn't) and records the new version but does not stop 
 
 Running update will do two things, install the latest Perforated Stuido docker container and update the corresponding Studio skills.
 
-### Project-level (export scripts)  
+### Project-level (export scripts)
+
 Each project also has a small set of bundled scripts under `.perforated_tools/` (the model export
 script and its helpers). Re-run `/register-project-studio` in a project to re-sync those against the
-running Server. It keeps the project's existing structure in the servers state after a major update.
+running Server. It keeps the project's existing structure in the server's state after a major update.
+
 ---
 
 ## Uninstalling
