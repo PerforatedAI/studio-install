@@ -6,8 +6,6 @@
 <img src="https://img.shields.io/badge/python-3.7%2B-blue?logo=python&logoColor=white" />
 <img src="https://img.shields.io/badge/Docker-required-blue?logo=docker&logoColor=white" />
 
-
-
 </div>
 
 # Introduction
@@ -19,9 +17,7 @@ Perforated Studio is the coding agent and dashboard that combines the CLI feel w
 <img src="assets/perforated-studio-hero.gif" alt="Perforated Studio demo visualization" width="800" />
 </div>
 
----
-
-## Quickstart
+# Quickstart
 
 ### Before you start
 
@@ -52,12 +48,11 @@ iwr -useb https://raw.githubusercontent.com/PerforatedAI/studio-install/main/boo
 .\bootstrap.ps1
 ```
 
-Add `-Port 4000` if something already owns port 3002.
+Add `-Port 4000` to `.\bootstrap.ps1` something already owns port 3002.
 
-This starts the shared Server (a single long-lived container, independent of any coding agent session).
-need to re-run this step.
+This starts the mcp Server (a single long-lived container, independent of any coding agent session).
 
-### 2. Register this project (once per project)
+### 2. Connect this project (once per project)
 
 In the Claude Code session in your project, ask Claude to register it:
 
@@ -69,7 +64,7 @@ The Skill walks you through the steps. Your project gets its own Project ID and 
 
 **Then restart Claude Code.** It reads `.mcp.json` at startup, so a running session won't see the Studio until you do.
 
-### 3. Check it's alive
+Check to make sure the studio is connected to your project
 
 ```
 /dashboard-studio
@@ -77,18 +72,8 @@ The Skill walks you through the steps. Your project gets its own Project ID and 
 
 Claude pings the Server and opens the Studio in your browser. If it says the server isn't connected, see [Troubleshooting](#troubleshooting).
 
-### 4. Look at your model
 
-```
-/visualize-model-studio
-```
-
-Claude asks for your model file, class name, and dataloader, runs the export script locally, and
-opens the result as an interactive graph.
-
-This step is optional, but it is a good way to visualize your model you are about to train.
-
-### 5. Add dendrites
+### 3. Add dendrites and Train
 
 ```
 /perforate-my-model-studio
@@ -98,9 +83,7 @@ The Skill walks you through wrapping your model with PerforatedAI: which layers 
 the switching policy is, and how the training loop changes. It writes a Perforation Config next to
 your model.
 
-This skill also brings up the Studio setup page which assists you in configuring your project, setting baselines, and keeps track of your goals.
-
-### 6. Train, and watch it grow
+This skill also brings up the Studio setup page which assists you in configuring your project, setting baselines, and keeps track of your goals. After your model is set up to run with dendrites the `/train-my-model-studio` skill. This ensures your project wired to the Studio.
 
 ```
 /train-my-model-studio
@@ -123,7 +106,7 @@ it will; the choice resets on the next run.
 > tried a dendrite set and rejected it because it didn't earn its place. Three switches with two
 > dendrites is the model telling you it's saturating.
 
-### 7. Read the results
+### 4. Analyze the results
 
 ```
 /perforatedai-analyze-studio
@@ -132,7 +115,7 @@ it will; the choice resets on the next run.
 The Skill reads the run output and tells you what the dendrites bought you — accuracy per parameter
 added, where returns started diminishing, what to try next.
 
----
+# API 
 
 ## Install reference
 
@@ -175,9 +158,7 @@ Flags are passed as named parameters, e.g. `.\bootstrap.ps1 -Port 4000`:
 
 > **Windows support:** `bootstrap.ps1` mirrors the Unix flow but **has not been tested on a real Windows machine**. If you encounter issues, please report them.
 
----
-
-## What it does to your machine
+### What it does to your machine
 
 1. Pulls the Studio image from `ghcr.io/perforatedai/studio` and checks it that it installed correctly.
 2. Starts a shared Docker container (`perforatedai-studio-server`).
@@ -185,8 +166,6 @@ Flags are passed as named parameters, e.g. `.\bootstrap.ps1 -Port 4000`:
 4. Records the installation in `~/.perforated_studio/` for tracking and upgrades.
 
 **It does not touch any project directories.** Each project registers itself separately via the `/register-project-studio` Skill in Claude Code, which adds entries to that project's `.mcp.json` and `.perforated_tools/` — but leaves nothing on disk until the Skill is run.
-
----
 
 ## Updating
 
@@ -208,6 +187,22 @@ Running update will do two things, install the latest Perforated Stuido docker c
 Each project also has a small set of bundled scripts under `.perforated_tools/` (the model export
 script and its helpers). Re-run `/register-project-studio` in a project to re-sync those against the
 running Server. It keeps the project's existing structure in the server's state after a major update.
+
+
+## Skill reference
+
+| Skill | What it does |
+| --- | --- |
+| `/register-project-studio` | Registers this project with the shared Server so it can use Studio tools and connect to the Dashboard. |
+| `/dashboard-studio` | Verifies the MCP server is reachable and opens the Dashboard in a browser tab. |
+| `/perforate-my-model-studio` | Walks you through wrapping your model with PerforatedAI: which layers get dendrites, the switching policy, and how the training loop changes. |
+| `/train-my-model-studio` | Guides you through launching a training run, wiring it to the Studio, and opening the live Training View. |
+| `/perforatedai-distributed-studio` | Multi-GPU setup (DataParallel or DDP) for PerforatedAI; invoked automatically when multi-GPU training is detected. |
+| `/perforatedai-analyze-studio` | Analyzes completed training results and opens the Results View, with a narrative and optimization recommendations. |
+| `/visualize-model-studio` | Exports a PyTorch model's architecture as a graph and opens it in the Dashboard Visualizer. |
+| `/compare-models-studio` | Exports two or more PyTorch models and opens them side-by-side in the Comparison View. |
+| `/aws-to-dashboard-studio` | Opens a reverse SSH tunnel so an AWS EC2 instance can reach the locally-running Dashboard. |
+| `/uninstall-studio` | Uninstalls Perforated Studio from this machine entirely: removes global Skills, stops the shared Server, and removes the machine manifest. |
 
 ---
 
@@ -259,8 +254,6 @@ On Windows:
 & "$env:USERPROFILE\.perforated_studio\bin\uninstall-server.ps1"   # add -PurgeData to also drop the data volume
 ```
 
----
-
 ## Troubleshooting
 
 **`/dashboard-studio` says the MCP Server isn't connected.**
@@ -287,3 +280,6 @@ chart shows switches but the diagram stays at zero, PerforatedAI is trying dendr
 rejecting all of them — that's a real result, not a bug. Check the PB Scores chart: flat or absent
 candidate scores mean the dendrites aren't learning anything worth keeping.
 
+## Connect on Slack
+
+Every installation sends an invite to our commnunity slack channel. Please join and connect with other developers using Perforated. Get help, give feedback and share your projects with others in the commnunity.
